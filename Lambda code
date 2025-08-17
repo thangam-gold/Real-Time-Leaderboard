@@ -1,0 +1,36 @@
+import boto3
+
+dynamodb = boto3.resource('dynamodb')
+leaderboard_table = dynamodb.Table('Leaderboard')
+
+def lambda_handler(event, context):
+    for record in event['Records']:
+        if record['eventName'] in ['INSERT', 'MODIFY']:
+            new_image = record['dynamodb']['NewImage']
+            game_id = new_image['GameID']['S']
+            player_id = new_image['PlayerID']['S']
+            score = int(new_image['Score']['N'])
+
+            # Fetch existing leaderboard for this game
+            response = leaderboard_table.query(
+                KeyConditionExpression="GameID = :g",
+                ExpressionAttributeValues={":g": game_id}
+            )
+            items = response['Items']
+
+            # Add new score & sort
+            items.append({"GameID": game_id, "PlayerID": player_id, "Score": score})
+            items = sorted(items, key=lambda x: x['Score'], reverse=True)[:5]
+
+            # Update leaderboard table
+            with leaderboard_table.batch_writer() as batch:
+                for rank, player in enumerate(items, start=1):
+                    batch.put_item(
+                        Item={
+                            "GameID": game_id,
+                            "Rank": rank,
+                            "PlayerID": player["PlayerID"],
+                            "Score": player["Score"]
+                        }
+                    )
+    return {"statusCode": 200}
